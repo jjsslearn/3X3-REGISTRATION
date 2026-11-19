@@ -218,6 +218,9 @@ app.get('/api/admin/csv', need, (req, res) => {
   res.send('\ufeff' + [H.map(q).join(','), ...rows].join('\n'));
 });
 
+const fs = require('fs');
+const INDEX = [path.join(__dirname, 'public', 'index.html'), path.join(__dirname, 'index.html')].find(f => fs.existsSync(f));
+app.get(['/', '/index.html'], (req, res) => INDEX ? res.sendFile(INDEX) : res.status(500).send('index.html is missing. Put it in a folder named "public" next to server.js.'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 app.use((err, req, res, next) => { console.error(err); res.status(err.status || 500).json({ error: 'Something went wrong. Please try again.' }); });
