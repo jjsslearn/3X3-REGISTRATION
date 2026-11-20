@@ -24,7 +24,8 @@ function memoryStore() {
   return {
     async load() { return JSON.parse(JSON.stringify(t)); },
     async append(tab, row) { t[tab].push(row); },
-    async replace(tab, rows) { t[tab] = rows.map(r => r.slice()); }
+    async replace(tab, rows) { t[tab] = rows.map(r => r.slice()); },
+    async archive(name, rows) { t[name] = rows.map(r => r.slice()); }
   };
 }
 function appsScriptStore() { // talks to the small Google Apps Script attached to your Sheet (see apps-script/Code.gs)
@@ -38,7 +39,8 @@ function appsScriptStore() { // talks to the small Google Apps Script attached t
   return {
     async load() { return (await call({ action: 'load', headers: HDR })).data; },
     async append(tab, row) { await call({ action: 'append', tab, row }); },
-    async replace(tab, rows) { await call({ action: 'replace', tab, rows }); }
+    async replace(tab, rows) { await call({ action: 'replace', tab, rows }); },
+    async archive(name, rows) { await call({ action: 'load', headers: { [name]: HDR.Registrations } }); await call({ action: 'replace', tab: name, rows }); }
   };
 }
 const useSheets = !!(SHEET_API_URL && SHEET_TOKEN);
@@ -201,6 +203,27 @@ app.post('/api/admin/settings', need, wrap((req, res) => lock(async () => {
   const old = settings; settings = { title, desc, deadline };
   try { await saveSettings(); } catch (e) { console.error(e); settings = old; return res.status(500).json({ error: 'Could not save to Google Sheets.' }); }
   res.json({ ok: true });
+})));
+app.post('/api/admin/reset', need, wrap((req, res) => lock(async () => {
+  const { scope, confirm } = req.body || {};
+  if (!['registrations', 'teams', 'all'].includes(scope)) return res.status(400).json({ error: 'Choose what to delete.' });
+  if (String(confirm || '').trim() !== 'RESET') return res.status(400).json({ error: 'Type RESET (capital letters) to confirm.' });
+  const old = { regs, teams, cats, settings };
+  let archived = null;
+  try {
+    if (regs.length) { // keep a copy of the registrations in their own sheet tab before deleting anything
+      const d = new Date(Date.now() + OFFSET * 60000).toISOString();
+      archived = 'Archive ' + d.slice(0, 10) + ' ' + d.slice(11, 16).replace(':', '-');
+      await store.archive(archived, rowsAll());
+    }
+    regs = []; await store.replace('Registrations', []);
+    if (scope !== 'registrations') { teams = []; await saveTeams(); }
+    if (scope === 'all') { cats = []; settings = {}; await saveCats(); await saveSettings(); }
+  } catch (e) {
+    console.error(e); ({ regs, teams, cats, settings } = old);
+    return res.status(500).json({ error: 'The reset stopped part-way. Press "Reload from Google Sheet" and check your sheet.' });
+  }
+  res.json({ ok: true, archived });
 })));
 app.post('/api/admin/category', need, wrap((req, res) => lock(async () => {
   const b = req.body || {}, name = String(b.name || '').trim().slice(0, 40), from = String(b.from || ''), to = String(b.to || '');
