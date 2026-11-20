@@ -57,13 +57,15 @@ table{width:100%;border-collapse:collapse;background:var(--card);margin:12px 0}t
 .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}footer{color:var(--mut);text-align:center;padding:20px;font-size:14px}
 @media print{.top,.cta,footer,.row{display:none}}
 .tcard .th .fj{font:600 13px Barlow,sans-serif;background:var(--ok);color:#fff;border-radius:999px;padding:2px 10px;vertical-align:middle;margin-left:6px}
+.catb{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;background:var(--card);border:1px solid var(--ln);border-radius:10px;padding:14px 16px;cursor:pointer;color:var(--tx);font:inherit}.catb:hover{border-color:var(--ac)}.catb b{font:700 24px "Barlow Condensed",sans-serif}.catb small{color:var(--mut)}
 </style></head><body>
 <header class="top"><a class="brand" href="#"><span class="ball"></span>3x3 Open</a>
 <nav aria-label="Main"><a data-nav="home" href="#">Home</a><a data-nav="register" href="#register">Register</a><a id="adm" data-nav="admin" href="#admin">Organiser</a><span id="who" class="who"></span></nav></header>
 <main id="app"></main>
 <footer>3x3 Basketball Competition · Team registration</footer>
 <script>
-let CFG={cats:[],teams:[],free:10},KEYS={},picked=null,pickId=null,admin=false,regs=[],last=null;
+let CFG={cats:[],teams:[],free:10,title:'3x3 Basketball Competition',desc:'Three players, one basket, ten minutes of non-stop action. Read how the competition and the registration work below, then register your team.',deadline:''},KEYS={},picked=null,pickId=null,pickCat=null,existing=null,canEdit=true,admin=false,regs=[],last=null;
+const cfgFrom=c=>{if(c.title)document.title=c.title+' – Team registration';return{cats:c.cats,teams:c.teams,free:c.free,title:c.title||CFG.title,desc:c.desc||CFG.desc,deadline:c.deadline||''}};
 const api=async(p,o={})=>{try{const r=await fetch('/api/'+p,{method:o.method||'GET',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:o.body?JSON.stringify(o.body):undefined});let j={};try{j=await r.json()}catch(e){}return{...j,ok:r.ok,status:r.status}}catch(e){return{ok:false,status:0,error:'Network error. Please check your connection and try again.'}}};
 const SIZES=['28','30','32','34','36','38','40','42','44','46','48'];
 const today=()=>new Date().toISOString().slice(0,10);
@@ -74,8 +76,8 @@ const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const R=()=>location.hash.slice(1)||'home';
 
-function home(){return `<div class="wrap"><div class="hero"><p class="kick">Team registration</p><h1>3x3 Basketball<br>Competition</h1>
-<p class="lead">Three players, one basket, ten minutes of non-stop action. Read how the competition and the registration work below, then register your team.</p>
+function home(){return `<div class="wrap"><div class="hero"><p class="kick">Team registration</p><h1>${esc(CFG.title)}</h1>
+<p class="lead">${esc(CFG.desc).replace(/\n/g,'<br>')}</p>
 <a class="btn" href="#register">Register your team</a></div>
 <section class="blk"><h2>About 3x3</h2><div class="cards">
 <div class="card"><b>3 + 1 players</b><p>Three players per team on court. A team may register a fourth player as a substitute.</p></div>
@@ -104,14 +106,14 @@ const pf=i=>`<fieldset><legend>Player ${i}${i>3?' <em>(optional)</em>':' *'}</le
 
 function form(){return `<div class="wrap narrow"><form onsubmit="return false" novalidate><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Register your team</h1>
 <p class="sub">Fields marked * are required. Players 1 to 3 are mandatory; Player 4 is optional.</p>
-${teamBox()}
+${editNote()}${teamBox()}
 ${[1,2,3,4].map(pf).join('')}
 <fieldset><legend>Contact person *</legend><div class="g2">
 <label>Name<input id="cn" autocomplete="name"><small class="err" id="e-cn"></small></label>
 <label>Phone<input id="cp" type="tel" autocomplete="tel"><small class="err" id="e-cp"></small></label>
 <label>Email<input id="ce" type="email" autocomplete="email"><small class="err" id="e-ce"></small></label>
 <div id="role" tabindex="-1"><label style="margin-bottom:0">This contact is the</label><div class="roles">${['Parent','Coach','Player'].map(r=>`<label><input type="radio" name="role" value="${r}">${r==='Player'?'Player (themself)':r}</label>`).join('')}</div><small class="err" id="e-role"></small></div></div></fieldset>
-<p class="msg" id="msg" role="alert"></p><button class="btn" type="button" data-act="submit" ${CFG.cats.length?'':'disabled'}>Submit registration</button></form></div>`}
+<p class="msg" id="msg" role="alert"></p><button class="btn" type="button" data-act="submit" ${CFG.cats.length?'':'disabled'}>${existing?'Save changes':'Submit registration'}</button></form></div>`}
 
 function read(){const g=id=>{const e=$('#'+id);return e?(e.value||'').trim():''},r=$('input[name=role]:checked');
  return{team:picked.name,cat:picked.cat,players:[1,2,3,4].map(i=>({name:g('n'+i),dob:g('d'+i),chest:g('c'+i),size:g('s'+i),fiba:g('f'+i)})),contact:{name:g('cn'),role:r?r.value:'',phone:g('cp'),email:g('ce')}}}
@@ -142,11 +144,19 @@ function catMgr(){return `<section class="blk" style="padding-top:6px"><h2>Categ
 <div class="scroll"><table><tr><th>Category</th><th>Date of birth range</th><th>Teams</th><th></th></tr>${CFG.cats.map(c=>`<tr><td>${esc(c.name)}</td><td>${fmt(c.from)} to ${fmt(c.to)}</td><td>${regs.filter(r=>r.cat&&r.cat.id===c.id).length}</td><td><button class="btn alt sm" data-act="delcat" data-id="${esc(c.id)}" ${CFG.teams.some(t=>t.cat===c.id)?'disabled title="Used by a team"':''}>${pdel===c.id?'Tap again':'Delete'}</button></td></tr>`).join('')||'<tr><td colspan="4">No categories yet. Add one so teams can register.</td></tr>'}</table></div></section>`}
 
 function catName(id){return (CFG.cats.find(c=>c.id===id)||{name:'No category'}).name}
-function teamPick(){const T=CFG.teams;if(!T.length)return `<div class="wrap narrow"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Register your team</h1><div class="card">Registration is not open yet: the organiser has not added any teams.</div></div>`;
- return `<div class="wrap narrow"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Register your team</h1><p class="sub">Choose your team from the list and enter the secret key the organiser gave you.</p>
-<div class="tl">${T.map(t=>`<label class="tr"><input type="radio" name="tm" value="${esc(t.id)}" ${pickId===t.id?'checked':''}><span><b>${esc(t.name)}</b><small>${esc(catName(t.cat))}</small></span></label>`).join('')}</div>
+function catPick(){const C=CFG.cats;return `<div class="wrap narrow"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Register your team</h1>${C.length&&CFG.teams.length?`<p class="sub">Step 1 of 2. Choose your category.</p><div class="tl">${C.map(c=>{const n=CFG.teams.filter(t=>t.cat===c.id).length;return `<button type="button" class="catb" data-act="pcat" data-id="${esc(c.id)}"><b>${esc(c.name)}</b><small>${rng(c)} · ${n} team${n===1?'':'s'}</small></button>`}).join('')}</div>`:'<div class="card">Registration is not open yet: the organiser has not added categories and teams.</div>'}</div>`}
+function teamPick(){const c=CFG.cats.find(x=>x.id===pickCat),T=CFG.teams.filter(t=>t.cat===pickCat);
+ return `<div class="wrap narrow"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Register your team</h1><p class="sub">Step 2 of 2. <b>${esc(c?c.name:'')}</b>: choose your team and enter its secret key. If your team is already registered you will see your saved players and can edit them${CFG.deadline?' until the end of '+fmt(CFG.deadline):''}.</p>
+<div class="tl">${T.map(t=>`<label class="tr"><input type="radio" name="tm" value="${esc(t.id)}" ${pickId===t.id?'checked':''}><span><b>${esc(t.name)}</b><small>${t.reg?'Registered':'Not registered yet'}</small></span></label>`).join('')||'<div class="card">No teams in this category yet.</div>'}</div>
 <fieldset><legend>Secret key *</legend><label>Secret key<input id="sk" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX"><small class="err" id="e-sk"></small></label></fieldset>
-<p class="msg" id="msg" role="alert"></p><button class="btn" data-act="unlock">Continue</button></div>`}
+<p class="msg" id="msg" role="alert"></p><div class="row" style="margin-top:0"><button class="btn" data-act="unlock">Continue</button><button class="btn alt" data-act="backcat">Change category</button></div></div>`}
+function editNote(){return existing?`<div class="card" style="margin-bottom:16px"><p style="margin:0"><b>Your team is registered (${esc(existing.ref)}).</b> Your saved details are filled in below. Change them and press Save changes${CFG.deadline?' any time until the end of '+fmt(CFG.deadline):''}.</p></div>`:''}
+function viewV(){const r=existing;return `<div class="wrap narrow"><div class="ok warn"><h2>${esc(r.team)} is registered</h2><p>Editing closed${CFG.deadline?' on '+fmt(CFG.deadline):''}. These are your saved details. Contact the organiser if something must change.</p><div class="ref">${esc(r.ref)}</div><p><b>Number ${r.pos} in ${esc(r.cat.name)}.</b></p>
+<div class="scroll"><table>${r.players.map((p,i)=>`<tr><th>Player ${i+1}</th><td>${esc(p.name)}</td><td>Born ${fmt(p.dob)}</td><td>Chest ${esc(p.chest)} · Size ${esc(p.size)}</td><td>FIBA ID ${esc(p.fiba)}</td></tr>`).join('')}<tr><th>Contact</th><td colspan="4">${esc(r.contact.name)} (${esc(r.contact.role)}) · ${esc(r.contact.phone)} · ${esc(r.contact.email)}</td></tr></table></div>
+<div class="row"><button class="btn alt" data-act="again">Back</button></div></div></div>`}
+function fillForm(){const v=(id,x)=>{const e=$('#'+id);if(e)e.value=x||''};(existing.players||[]).forEach((p,k)=>{const i=k+1;v('n'+i,p.name);v('d'+i,p.dob);v('c'+i,p.chest);v('s'+i,p.size);v('f'+i,p.fiba)});const c=existing.contact||{};v('cn',c.name);v('cp',c.phone);v('ce',c.email);const r=document.querySelector('input[name=role][value='+c.role+']');if(r)r.checked=true}
+function settingsMgr(){return `<section class="blk" style="padding-top:6px"><h2>Home page and editing deadline</h2><p class="sub">The title and description appear on the home page. Teams can edit their players until the end of the deadline day. Leave the date empty to keep editing open.</p>
+<div class="card"><label>Tournament title<input id="st" value="${esc(CFG.title)}" maxlength="80"></label><label style="margin-top:10px">Description<textarea id="sd" maxlength="600" style="min-height:110px;font:inherit">${esc(CFG.desc)}</textarea></label><label style="margin-top:10px;max-width:280px">Teams can edit until (end of day)<input id="sx" type="date" value="${esc(CFG.deadline||'')}"></label><div class="row"><button class="btn" data-act="savesettings">Save</button></div></div></section>`}
 function teamBox(){const c=CFG.cats.find(x=>x.id===picked.cat);return `<fieldset><legend>Team</legend><b style="font:700 28px 'Barlow Condensed',sans-serif">${esc(picked.name)}</b> · ${esc(c?c.name:'No category')}<p class="sub" style="margin:6px 0 10px">${c?'Every player must be '+rng(c)+'.':'This team has no valid category. Ask the organiser.'}</p><button class="btn alt sm" type="button" data-act="back">Change team</button></fieldset>`}
 function teamMgr(){return `<section class="blk" style="padding-top:6px"><h2>Teams and secret keys</h2><p class="sub">Add each team here and give it its secret key. Without the key a team cannot register.</p>
 <div class="card"><div class="g3"><label>Team name<input id="tn" autocomplete="off"></label><label>Category<select id="tc"><option value="">Select</option>${CFG.cats.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></label></div><p class="msg" id="tmsg" style="margin-top:10px"></p><button class="btn" data-act="addteam">Add team</button></div>
@@ -155,11 +165,11 @@ function teamMgr(){return `<section class="blk" style="padding-top:6px"><h2>Team
 async function submit(){const d=read(),er=check(d),ks=Object.keys(er);$$('.err').forEach(x=>x.textContent='');
  if(ks.length){ks.forEach(k=>{const el=$('#e-'+k);if(el)el.textContent=er[k]});const f=$('#'+ks[0]);if(f)f.focus();$('#msg').textContent='Please fix the fields marked in red.';return}
  $('#msg').textContent='';const b=$('[data-act=submit]');b.disabled=true;b.textContent='Submitting…';
- const r=await api('register',{method:'POST',body:{teamId:picked.id,key:picked.key,players:d.players.filter(filled),contact:d.contact}});
- if(!r.ok){b.disabled=false;b.textContent='Submit registration';if(r.errors)Object.keys(r.errors).forEach(k=>{const el=$('#e-'+k);if(el)el.textContent=r.errors[k]});$('#msg').textContent=r.error||'Please fix the fields marked in red.';return}
- last={rec:r.rec,pos:r.pos,free:r.free};render();scrollTo(0,0)}
+ const r=await api('register',{method:existing?'PUT':'POST',body:{teamId:picked.id,key:picked.key,players:d.players.filter(filled),contact:d.contact}});
+ if(!r.ok){b.disabled=false;b.textContent=existing?'Save changes':'Submit registration';if(r.errors)Object.keys(r.errors).forEach(k=>{const el=$('#e-'+k);if(el)el.textContent=r.errors[k]});$('#msg').textContent=r.error||'Please fix the fields marked in red.';return}
+ last={rec:r.rec,pos:r.pos,free:r.free,edited:!!existing};existing={...r.rec,pos:r.pos,free:r.free};const tt=CFG.teams.find(x=>x.id===picked.id);if(tt)tt.reg=true;render();scrollTo(0,0)}
 function done(){const{rec,pos,free}=last;
- return `<div class="wrap narrow"><div class="ok"><h2>Registration received</h2><p>Thank you. Keep this reference code as your confirmation.</p><div class="ref">${esc(rec.ref)}</div>
+ return `<div class="wrap narrow"><div class="ok"><h2>${last.edited?'Changes saved':'Registration received'}</h2><p>${last.edited?'Your updated details are saved.':'Thank you. Keep this reference code as your confirmation.'}${CFG.deadline?' You can edit your players until the end of '+fmt(CFG.deadline)+'.':' You can come back and edit your players.'}</p><div class="ref">${esc(rec.ref)}</div>
 <p><b>Your team is number ${pos} in ${esc(rec.cat.name)}.</b> ${free?'You are among the first '+CFG.free+' teams, so your team gets free jerseys.':'Free jerseys were for the first '+CFG.free+' teams in each category.'}</p>
 <div class="scroll"><table><tr><th>Team</th><td colspan="4">${esc(rec.team)} · ${esc(rec.cat.name)}</td></tr>${rec.players.map((p,i)=>`<tr><th>Player ${i+1}</th><td>${esc(p.name)}</td><td>Born ${fmt(p.dob)}</td><td>Chest ${esc(p.chest)} · Size ${esc(p.size)}</td><td>FIBA ID ${esc(p.fiba)}</td></tr>`).join('')}
 <tr><th>Contact</th><td colspan="4">${esc(rec.contact.name)} (${esc(rec.contact.role)}) · ${esc(rec.contact.phone)} · ${esc(rec.contact.email)}</td></tr></table></div>
@@ -172,17 +182,17 @@ async function unlock(){const r=$('input[name=tm]:checked'),k=$('#sk').value,m=$
  const v=await api('verify',{method:'POST',body:{teamId:t.id,key:k}});
  b.disabled=false;b.textContent='Continue';
  if(!v.ok){$('#e-sk').textContent=v.error||'That key is not correct for '+t.name+'.';return}
- picked={...t,key:k};render();scrollTo(0,0)}
+ existing=v.reg||null;canEdit=v.canEdit!==false;picked={...t,key:k};render();scrollTo(0,0)}
 const tcard=r=>{const c=r.contact||{};return `<div class="tcard"><div class="th"><b>#${r.pos} ${esc(r.team)}${r.free?' <span class="fj">Free jersey</span>':''}</b><span>${esc(r.ref)} · ${new Date(r.at).toLocaleString()}</span></div><div class="scroll"><table><tr><th>#</th><th>Player</th><th>Born</th><th>Chest</th><th>Size</th><th>FIBA ID</th></tr>${(r.players||[]).map((p,i)=>`<tr><td>${i+1}</td><td>${esc(p.name)}</td><td>${fmt(p.dob)}</td><td>${esc(p.chest)}</td><td>${esc(p.size)}</td><td>${esc(p.fiba)}</td></tr>`).join('')}</table></div><p class="sub" style="margin:0">Contact: ${esc(c.name)} (${esc(c.role)}) · ${esc(c.phone)} · ${esc(c.email)}</p></div>`};
 function adminV(){const keys=[];regs.forEach(r=>{if(!keys.includes(r.cat.id))keys.push(r.cat.id)});
  const grp=keys.map(k=>{const L=regs.filter(r=>r.cat.id===k),c=L[0].cat;return `<h3 class="ch">${esc(c.name)}<span>${c.from?rng(c)+' · ':''}${L.length} team${L.length===1?'':'s'}</span></h3>${L.map(tcard).join('')}`}).join('');
- return `<div class="wrap"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Organiser</h1><p class="msg" id="amsg"></p>${catMgr()}${teamMgr()}
+ return `<div class="wrap"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Organiser</h1><p class="msg" id="amsg"></p>${settingsMgr()}${catMgr()}${teamMgr()}
 <section class="blk"><h2>Registrations</h2><p class="sub">${regs.length} team${regs.length===1?'':'s'} registered, in registration order within each category. The first ${CFG.free} teams in each category get free jerseys.</p>
 <div class="row"><a class="btn alt" href="/api/admin/csv">Download CSV</a><button class="btn alt" data-act="reload">Reload from Google Sheet</button></div>${grp||'<div class="card" style="margin-top:12px">No registrations yet.</div>'}</section></div>`}
 function loginV(){return `<div class="wrap narrow"><h1 style="font-size:clamp(34px,6vw,52px);margin-top:14px">Organiser login</h1><fieldset><legend>Sign in</legend><div class="g2"><label>Username<input id="au" autocomplete="username"></label><label>Password<input id="ap" type="password" autocomplete="current-password"></label></div></fieldset><p class="msg" id="msg" role="alert"></p><button class="btn" data-act="login">Sign in</button></div>`}
-async function loadAdmin(){const r=await api('admin/data');if(r.ok){admin=true;CFG={...CFG,cats:r.cats,free:r.free,teams:r.teams.map(t=>({id:t.id,name:t.name,cat:t.cat}))};KEYS={};r.teams.forEach(t=>KEYS[t.id]=t.key);regs=r.regs}else{admin=false}render()}
+async function loadAdmin(){const r=await api('admin/data');if(r.ok){admin=true;CFG={...CFG,title:r.settings.title,desc:r.settings.desc,deadline:r.settings.deadline,cats:r.cats,free:r.free,teams:r.teams.map(t=>({id:t.id,name:t.name,cat:t.cat}))};KEYS={};r.teams.forEach(t=>KEYS[t.id]=t.key);regs=r.regs}else{admin=false}render()}
 async function login(){const r=await api('admin/login',{method:'POST',body:{username:$('#au').value.trim(),password:$('#ap').value}});if(!r.ok){$('#msg').textContent=r.error||'Login failed.';return}await loadAdmin()}
-async function logout(){await api('admin/logout',{method:'POST'});admin=false;regs=[];KEYS={};const c=await api('config');if(c.ok)CFG={cats:c.cats,teams:c.teams,free:c.free};render()}
+async function logout(){await api('admin/logout',{method:'POST'});admin=false;regs=[];KEYS={};const c=await api('config');if(c.ok)CFG=cfgFrom(c);render()}
 async function act(p,method,body){const r=await api(p,{method,body}),m=$('#amsg');if(!r.ok){if(r.status===401){admin=false;render();return false}if(m)m.textContent=r.error||'That did not work.';scrollTo(0,0);return false}await loadAdmin();return true}
 const addCat=()=>act('admin/category','POST',{name:$('#kn').value,from:$('#kf').value,to:$('#kt').value});
 const addTeam=()=>act('admin/team','POST',{name:$('#tn').value,cat:$('#tc').value});
@@ -192,12 +202,13 @@ const delCat=id=>twice(id,()=>act('admin/category/'+id,'DELETE'));
 const delTeam=id=>twice(id,()=>act('admin/team/'+id,'DELETE'));
 function render(){const r=R();$$('[data-nav]').forEach(a=>a.setAttribute('aria-current',a.dataset.nav===r?'page':'false'));
  $('#who').innerHTML=admin?'Organiser · <a href="#" data-act="logout">Sign out</a>':'';
- $('#app').innerHTML=r==='register'?(last?done():picked?form():teamPick()):r==='admin'?(admin?adminV():loginV()):home()}
+ $('#app').innerHTML=r==='register'?(last?done():picked?(existing&&!canEdit?viewV():form()):pickCat?teamPick():catPick()):r==='admin'?(admin?adminV():loginV()):home();
+ if(r==='register'&&!last&&picked&&existing&&canEdit)fillForm()}
 document.addEventListener('click',e=>{const t=e.target.closest('[data-act]');if(!t)return;const a=t.dataset.act,id=t.dataset.id;
- if(a==='submit')submit();else if(a==='unlock')unlock();else if(a==='back'){picked=null;render()}else if(a==='again'){last=null;picked=null;render();scrollTo(0,0)}
- else if(a==='login')login();else if(a==='logout'){e.preventDefault();logout()}else if(a==='addcat')addCat();else if(a==='delcat')delCat(id);else if(a==='addteam')addTeam();else if(a==='newkey')newKey(id);else if(a==='delteam')delTeam(id);else if(a==='reload')act('admin/reload','POST')});
+ if(a==='submit')submit();else if(a==='unlock')unlock();else if(a==='back'){picked=null;existing=null;render()}else if(a==='pcat'){pickCat=id;pickId=null;render();scrollTo(0,0)}else if(a==='backcat'){pickCat=null;render()}else if(a==='again'){last=null;picked=null;existing=null;pickCat=null;render();scrollTo(0,0)}
+ else if(a==='login')login();else if(a==='logout'){e.preventDefault();logout()}else if(a==='addcat')addCat();else if(a==='delcat')delCat(id);else if(a==='addteam')addTeam();else if(a==='newkey')newKey(id);else if(a==='delteam')delTeam(id);else if(a==='savesettings')act('admin/settings','POST',{title:$('#st').value,desc:$('#sd').value,deadline:$('#sx').value});else if(a==='reload')act('admin/reload','POST')});
 document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;if(e.target.id==='ap')login();else if(e.target.id==='sk')unlock()});
-addEventListener('hashchange',()=>{if(R()!=='register'){last=null;picked=null}if(R()==='admin'&&!admin)loadAdmin();else render();scrollTo(0,0)});
+addEventListener('hashchange',()=>{if(R()!=='register'){last=null;picked=null;existing=null;pickCat=null}if(R()==='admin'&&!admin)loadAdmin();else render();scrollTo(0,0)});
 render();
-(async()=>{const c=await api('config');if(c.ok){CFG={cats:c.cats,teams:c.teams,free:c.free}}if(R()==='admin')loadAdmin();else render()})();
+(async()=>{const c=await api('config');if(c.ok){CFG=cfgFrom(c)}if(R()==='admin')loadAdmin();else render()})();
 </script></body></html>
