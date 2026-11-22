@@ -51,7 +51,7 @@ let cats = [], teams = [], regs = [], settings = {};
 const catOf = id => cats.find(c => c.id === id);
 const toRow = (r, order) => {
   const c = catOf(r.catId) || {};
-  return [r.ref, r.at, c.name || '', String(order), order <= FREE ? 'Yes' : 'No', r.team,
+  return [r.ref, r.at, c.name || '', String(order), order > 0 && order <= FREE ? 'Yes' : 'No', r.team,
     ...[0, 1, 2, 3].flatMap(i => { const p = r.players[i] || {}; return [p.name || '', p.dob || '', p.chest || '', p.size || '', p.fiba || '']; }),
     r.contact.name, r.contact.role, r.contact.phone, r.contact.email, r.teamId, r.catId];
 };
@@ -71,14 +71,14 @@ const saveCats = () => store.replace('Categories', cats.map(c => [c.id, c.name, 
 const saveTeams = () => store.replace('Teams', teams.map(t => [t.id, t.name, t.cat, t.key]));
 const saveSettings = () => store.replace('Settings', [['title', settings.title || ''], ['desc', settings.desc || ''], ['deadline', settings.deadline || '']]);
 const editOpen = () => !settings.deadline || Date.now() <= Date.parse(settings.deadline + 'T23:59:59Z') - OFFSET * 60000;
-const rowsAll = () => { const cnt = {}; return regs.map(r => { cnt[r.catId] = (cnt[r.catId] || 0) + 1; return toRow(r, cnt[r.catId]); }); };
-const regView = team => { const r = ranked().find(x => x.teamId === team.id); return r ? { ref: r.ref, at: r.at, team: r.team, cat: catOf(r.catId), players: r.players, contact: r.contact, pos: r.pos, free: r.free } : null; };
-const cfgOut = () => ({ ok: true, cats, free: FREE, title: settings.title || DEF_TITLE, desc: settings.desc || DEF_DESC, deadline: settings.deadline || '', canEdit: editOpen(), teams: teams.map(t => ({ id: t.id, name: t.name, cat: t.cat, reg: regs.some(r => r.teamId === t.id) })) });
-function ranked() { // regs are kept in registration order, so position = order of arrival within the category
-  const cnt = {};
-  const out = regs.map(r => { cnt[r.catId] = (cnt[r.catId] || 0) + 1; return { ...r, pos: cnt[r.catId], free: cnt[r.catId] <= FREE }; });
-  const ix = r => { const i = cats.findIndex(c => c.id === r.catId); return i < 0 ? 999 : i; };
-  return out.sort((a, b) => ix(a) - ix(b) || a.pos - b.pos);
+const rankOf = t => teams.filter(x => x.cat === t.cat).findIndex(x => x.id === t.id) + 1; // position among the teams the organiser added to this category
+const freeOf = t => rankOf(t) <= FREE;
+const rowsAll = () => regs.map(r => { const t = teams.find(x => x.id === r.teamId); return toRow(r, t ? rankOf(t) : 0); });
+const regView = team => { const r = regs.find(x => x.teamId === team.id); return r ? { ref: r.ref, at: r.at, team: r.team, cat: catOf(team.cat) || catOf(r.catId), players: r.players, contact: r.contact, pos: rankOf(team), free: freeOf(team) } : null; };
+const cfgOut = () => ({ ok: true, cats, free: FREE, title: settings.title || DEF_TITLE, desc: settings.desc || DEF_DESC, deadline: settings.deadline || '', canEdit: editOpen(), teams: teams.map(t => ({ id: t.id, name: t.name, cat: t.cat, pos: rankOf(t), free: freeOf(t), reg: regs.some(r => r.teamId === t.id) })) });
+function ranked() { // every team the organiser added, grouped by category, in the order they were added; the position decides the free jersey
+  const ix = t => { const i = cats.findIndex(c => c.id === t.cat); return i < 0 ? 999 : i; };
+  return teams.map(t => ({ team: t, pos: rankOf(t), free: freeOf(t), reg: regs.find(x => x.teamId === t.id) || null })).sort((a, b) => ix(a.team) - ix(b.team) || a.pos - b.pos);
 }
 
 // ---- Helpers ----
@@ -147,14 +147,15 @@ app.post('/api/verify', limit('verify', 30, 600000), (req, res) => {
 app.post('/api/register', limit('reg', 30, 600000), wrap((req, res) => lock(async () => {
   const { teamId, key, players, contact } = req.body || {}, team = teams.find(t => t.id === teamId);
   if (!team || !eq(norm(key), norm(team.key))) return res.status(403).json({ error: 'The secret key is not correct for this team.' });
-  if (regs.some(r => r.teamId === team.id)) return res.status(409).json({ error: 'This team is already registered.' });
+  if (!editOpen()) return res.status(403).json({ error: 'The deadline for adding players has passed.' });
+  if (regs.some(r => r.teamId === team.id)) return res.status(409).json({ error: 'This team already has players. Open it again to edit them.' });
   const cat = catOf(team.cat);
   if (!cat) return res.status(409).json({ error: 'This team has no category. Please contact the organiser.' });
   const taken = new Set(regs.flatMap(r => r.players.map(p => p.fiba.toLowerCase())));
   const { e, pl, c } = validate(cat, players, contact, taken);
   if (Object.keys(e).length) return res.status(400).json({ error: e.msg || 'Please fix the fields marked in red.', errors: e });
   const rec = { ref: '3X3-' + crypto.randomBytes(4).toString('hex').toUpperCase().slice(0, 6), at: new Date().toISOString(), team: team.name, teamId: team.id, catId: cat.id, players: pl, contact: c };
-  const pos = regs.filter(r => r.catId === cat.id).length + 1;
+  const pos = rankOf(team);
   try { await store.append('Registrations', toRow(rec, pos)); }
   catch (err) { console.error(err); return res.status(500).json({ error: 'Could not save your registration. Please try again.' }); }
   regs.push(rec);
@@ -193,7 +194,8 @@ app.post('/api/admin/logout', (req, res) => { res.setHeader('Set-Cookie', 'adm=;
 app.get('/api/admin/data', need, (req, res) => res.json({
   ok: true, cats, free: FREE, settings: { title: settings.title || DEF_TITLE, desc: settings.desc || DEF_DESC, deadline: settings.deadline || '' },
   teams: teams.map(t => ({ id: t.id, name: t.name, cat: t.cat, key: t.key })),
-  regs: ranked().map(r => ({ ref: r.ref, at: r.at, team: r.team, teamId: r.teamId, cat: catOf(r.catId) || { id: r.catId, name: 'Unknown category' }, players: r.players, contact: r.contact, pos: r.pos, free: r.free }))
+  rows: ranked().map(x => ({ id: x.team.id, name: x.team.name, cat: catOf(x.team.cat) || { id: x.team.cat, name: 'Unknown category' }, pos: x.pos, free: x.free, reg: x.reg ? { ref: x.reg.ref, at: x.reg.at, players: x.reg.players, contact: x.reg.contact } : null })),
+  regs: regs.map(r => ({ ref: r.ref, teamId: r.teamId }))
 }));
 app.post('/api/admin/reload', need, wrap(async (req, res) => { await lock(hydrate); res.json({ ok: true }); }));
 app.post('/api/admin/settings', need, wrap((req, res) => lock(async () => {
@@ -264,17 +266,17 @@ app.delete('/api/admin/team/:id', need, wrap((req, res) => lock(async () => {
 })));
 app.get('/api/admin/csv', need, (req, res) => {
   const q = v => { v = String(v == null ? '' : v); if (/^[=@]|^[+-][A-Za-z(]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; };
-  const H = ['Category', 'Order', 'Free jersey', 'Team', 'Reference', 'Submitted'];
+  const H = ['Category', 'Order', 'Free jersey', 'Team', 'Players added', 'Reference', 'Submitted'];
   for (let i = 1; i <= 4; i++) H.push('P' + i + ' name', 'P' + i + ' DOB', 'P' + i + ' chest', 'P' + i + ' size', 'P' + i + ' FIBA ID');
   H.push('Contact', 'Role', 'Phone', 'Email');
-  const rows = ranked().map(r => {
-    const o = [(catOf(r.catId) || {}).name, r.pos, r.free ? 'Yes' : 'No', r.team, r.ref, r.at];
-    for (let i = 0; i < 4; i++) { const p = r.players[i] || {}; o.push(p.name, p.dob, p.chest, p.size, p.fiba); }
-    o.push(r.contact.name, r.contact.role, r.contact.phone, r.contact.email);
+  const rows = ranked().map(x => {
+    const r = x.reg, o = [(catOf(x.team.cat) || {}).name, x.pos, x.free ? 'Yes' : 'No', x.team.name, r ? 'Yes' : 'No', r ? r.ref : '', r ? r.at : ''];
+    for (let i = 0; i < 4; i++) { const p = (r && r.players[i]) || {}; o.push(p.name, p.dob, p.chest, p.size, p.fiba); }
+    o.push(r ? r.contact.name : '', r ? r.contact.role : '', r ? r.contact.phone : '', r ? r.contact.email : '');
     return o.map(q).join(',');
   });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="3x3-registrations.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="3x3-teams.csv"');
   res.send('\ufeff' + [H.map(q).join(','), ...rows].join('\n'));
 });
 
