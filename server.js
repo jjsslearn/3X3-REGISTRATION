@@ -3,7 +3,7 @@ const express = require('express'), crypto = require('crypto'), path = require('
 const { ADMIN_USER, ADMIN_PASS, SHEET_API_URL, SHEET_TOKEN } = process.env;
 const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const FREE = parseInt(process.env.FREE_JERSEYS || '10', 10);
-const VERSION = '5'; // the page and the server must be uploaded together; the page warns if they differ
+const VERSION = '6'; // the page and the server must be uploaded together; the page warns if they differ
 const OFFSET = parseInt(process.env.TZ_OFFSET_MIN || '330', 10); // minutes ahead of UTC (330 = India) for the edit deadline
 const DEF_TITLE = '3x3 Basketball Competition';
 const DEF_DESC = 'Three players, one basket, ten minutes of non-stop action. Read how the competition and the registration work below, then register your team.';
@@ -236,6 +236,36 @@ app.post('/api/admin/category', need, wrap((req, res) => lock(async () => {
   if (cats.some(c => c.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: 'That category already exists.' });
   const old = cats; cats = [...cats, { id: uid('c'), name, from, to }];
   try { await saveCats(); } catch (e) { console.error(e); cats = old; return res.status(500).json({ error: 'Could not save to Google Sheets.' }); }
+  res.json({ ok: true });
+})));
+app.put('/api/admin/category/:id', need, wrap((req, res) => lock(async () => {
+  const c = catOf(req.params.id);
+  if (!c) return res.status(404).json({ error: 'Category not found.' });
+  const b = req.body || {}, name = String(b.name || '').trim().slice(0, 40), from = String(b.from || ''), to = String(b.to || '');
+  if (name.length < 2) return res.status(400).json({ error: 'Enter a category name.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Choose both dates.' });
+  if (from > to) return res.status(400).json({ error: 'The first date must not be after the second.' });
+  if (cats.some(x => x.id !== c.id && x.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: 'That category already exists.' });
+  if (from !== c.from || to !== c.to) {
+    const bad = regs.filter(r => r.catId === c.id && r.players.some(p => p.dob < from || p.dob > to)).map(r => r.team);
+    if (bad.length) return res.status(409).json({ error: 'Players of these teams would fall outside the new dates: ' + bad.join(', ') + '. Edit those players first.' });
+  }
+  const old = cats; cats = cats.map(x => x.id === c.id ? { ...x, name, from, to } : x);
+  try { await saveCats(); if (regs.some(r => r.catId === c.id)) await store.replace('Registrations', rowsAll()); }
+  catch (e) { console.error(e); cats = old; return res.status(500).json({ error: 'Could not save to Google Sheets.' }); }
+  res.json({ ok: true });
+})));
+app.put('/api/admin/team/:id', need, wrap((req, res) => lock(async () => {
+  const t = teams.find(x => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: 'Team not found.' });
+  const name = String((req.body || {}).name || '').trim().slice(0, 60);
+  if (name.length < 2) return res.status(400).json({ error: 'Enter the team name.' });
+  if (teams.some(x => x.id !== t.id && x.cat === t.cat && x.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: 'That team name already exists in this category.' });
+  const oldTeams = teams, oldRegs = regs;
+  teams = teams.map(x => x.id === t.id ? { ...x, name } : x);
+  regs = regs.map(r => r.teamId === t.id ? { ...r, team: name } : r);
+  try { await saveTeams(); if (regs.some(r => r.teamId === t.id)) await store.replace('Registrations', rowsAll()); }
+  catch (e) { console.error(e); teams = oldTeams; regs = oldRegs; return res.status(500).json({ error: 'Could not save to Google Sheets.' }); }
   res.json({ ok: true });
 })));
 app.delete('/api/admin/category/:id', need, wrap((req, res) => lock(async () => {
