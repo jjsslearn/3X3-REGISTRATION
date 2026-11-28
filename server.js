@@ -3,6 +3,7 @@ const express = require('express'), crypto = require('crypto'), path = require('
 const { ADMIN_USER, ADMIN_PASS, SHEET_API_URL, SHEET_TOKEN } = process.env;
 const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const FREE = parseInt(process.env.FREE_JERSEYS || '10', 10);
+const VERSION = '5'; // the page and the server must be uploaded together; the page warns if they differ
 const OFFSET = parseInt(process.env.TZ_OFFSET_MIN || '330', 10); // minutes ahead of UTC (330 = India) for the edit deadline
 const DEF_TITLE = '3x3 Basketball Competition';
 const DEF_DESC = 'Three players, one basket, ten minutes of non-stop action. Read how the competition and the registration work below, then register your team.';
@@ -75,7 +76,7 @@ const rankOf = t => teams.filter(x => x.cat === t.cat).findIndex(x => x.id === t
 const freeOf = t => rankOf(t) <= FREE;
 const rowsAll = () => regs.map(r => { const t = teams.find(x => x.id === r.teamId); return toRow(r, t ? rankOf(t) : 0); });
 const regView = team => { const r = regs.find(x => x.teamId === team.id); return r ? { ref: r.ref, at: r.at, team: r.team, cat: catOf(team.cat) || catOf(r.catId), players: r.players, contact: r.contact, pos: rankOf(team), free: freeOf(team) } : null; };
-const cfgOut = () => ({ ok: true, cats, free: FREE, title: settings.title || DEF_TITLE, desc: settings.desc || DEF_DESC, deadline: settings.deadline || '', canEdit: editOpen(), teams: teams.map(t => ({ id: t.id, name: t.name, cat: t.cat, pos: rankOf(t), free: freeOf(t), reg: regs.some(r => r.teamId === t.id) })) });
+const cfgOut = () => ({ ok: true, version: VERSION, cats, free: FREE, title: settings.title || DEF_TITLE, desc: settings.desc || DEF_DESC, deadline: settings.deadline || '', canEdit: editOpen(), teams: teams.map(t => ({ id: t.id, name: t.name, cat: t.cat, pos: rankOf(t), free: freeOf(t), reg: regs.some(r => r.teamId === t.id) })) });
 function ranked() { // every team the organiser added, grouped by category, in the order they were added; the position decides the free jersey
   const ix = t => { const i = cats.findIndex(c => c.id === t.cat); return i < 0 ? 999 : i; };
   return teams.map(t => ({ team: t, pos: rankOf(t), free: freeOf(t), reg: regs.find(x => x.teamId === t.id) || null })).sort((a, b) => ix(a.team) - ix(b.team) || a.pos - b.pos);
@@ -247,7 +248,7 @@ app.post('/api/admin/team', need, wrap((req, res) => lock(async () => {
   const b = req.body || {}, name = String(b.name || '').trim().slice(0, 60);
   if (name.length < 2) return res.status(400).json({ error: 'Enter the team name.' });
   if (!catOf(b.cat)) return res.status(400).json({ error: 'Choose a category (create one first).' });
-  if (teams.some(t => t.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: 'That team already exists.' });
+  if (teams.some(t => t.cat === b.cat && t.name.toLowerCase() === name.toLowerCase())) return res.status(409).json({ error: 'That team name already exists in this category.' });
   const old = teams; teams = [...teams, { id: uid('t'), name, cat: b.cat, key: genKey() }];
   try { await saveTeams(); } catch (e) { console.error(e); teams = old; return res.status(500).json({ error: 'Could not save to Google Sheets.' }); }
   res.json({ ok: true });
